@@ -37,7 +37,7 @@ To run the wallet, see the nockchain-wallet [README](./crates/nockchain-wallet/R
 
 ## Install Nockchain
 
-After you've run the setup and build commands, install the wallet:
+After you've run the setup and build commands, install Nockchain:
 
 ```
 make install-nockchain
