@@ -55,6 +55,10 @@ The script installs prerequisites, builds and installs the project, then
 starts `nockchain --fakenet` with limits tuned to your hardware. Provide the
 mining public key via the `MINING_PUBKEY` environment variable.
 
+Add `export MINING_PUBKEY=<your_pubkey>` to your `~/.bashrc` (or a system-wide
+profile) so the variable persists across reboots. The helper script relies on
+this variable and will fail if it is unset.
+
 
 
 ## Testing Nodes
