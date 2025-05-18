@@ -59,3 +59,7 @@ To run a test Nockchain node that waits for the genesis block:
 make run-nockchain-follower
 ```
 
+
+## Mining Setup
+
+See [docs/mining-setup.md](docs/mining-setup.md) for instructions on running a miner.
