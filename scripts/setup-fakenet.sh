@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+    echo "Usage: MINING_PUBKEY=<pubkey> $0 [--tmux]" >&2
+    exit 1
+}
+
+if [[ $# -gt 1 ]]; then
+    usage
+fi
+
 # Install prerequisites
 if ! command -v rustup >/dev/null 2>&1; then
     curl https://sh.rustup.rs -sSf | sh -s -- -y
@@ -18,6 +27,13 @@ fi
 make build
 make install-nockchain
 make install-nockchain-wallet
+
+if [[ "${1:-}" == "--tmux" ]]; then
+    tmux new-session -d -s nock_leader "make run-nockchain-leader"
+    tmux new-session -d -s nock_follower "make run-nockchain-follower"
+    echo "Started tmux sessions 'nock_leader' and 'nock_follower'"
+    exit 0
+fi
 
 CPU_COUNT=$(nproc)
 MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')

@@ -55,9 +55,25 @@ The script installs prerequisites, builds and installs the project, then
 starts `nockchain --fakenet` with limits tuned to your hardware. Provide the
 mining public key via the `MINING_PUBKEY` environment variable.
 
+ <<<<<<< codex/update-setup-fakenet-sh-and-readme
+To spin up both a leader and a follower in detached tmux sessions run:
+
+```bash
+MINING_PUBKEY=<your_pubkey> scripts/setup-fakenet.sh --tmux
+```
+
+This will execute:
+
+```bash
+tmux new-session -d -s nock_leader "make run-nockchain-leader"
+tmux new-session -d -s nock_follower "make run-nockchain-follower"
+```
+You can then attach with `tmux attach -t nock_leader` or `tmux attach -t nock_follower`.
+ =======
 Add `export MINING_PUBKEY=<your_pubkey>` to your `~/.bashrc` (or a system-wide
 profile) so the variable persists across reboots. The helper script relies on
 this variable and will fail if it is unset.
+ >>>>>>> master
 
 
 
