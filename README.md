@@ -43,6 +43,19 @@ After you've run the setup and build commands, install Nockchain:
 make install-nockchain
 ```
 
+## FakeNet Quick Start
+
+Use the helper script to bootstrap a local fakenet node:
+
+```bash
+MINING_PUBKEY=<your_pubkey> scripts/setup-fakenet.sh
+```
+
+The script installs prerequisites, builds and installs the project, then
+starts `nockchain --fakenet` with limits tuned to your hardware. Provide the
+mining public key via the `MINING_PUBKEY` environment variable.
+
+
 
 ## Testing Nodes
 
