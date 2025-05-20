@@ -2680,7 +2680,7 @@
         out=32
         typ=%d
         version=0x13
-        threads=4
+        threads=384
         mem-cost=786.432  ::  6GiB
         time-cost=6
         key=*byts
