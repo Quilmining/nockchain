@@ -38,6 +38,7 @@ tracing.workspace = true
 tracing-test.workspace = true
 
 zkvm-jetpack.workspace = true
+num_cpus.workspace = true
 
 [build-dependencies]
 vergen = { workspace = true, features = [
