@@ -1,3 +1,4 @@
+use std::env; // Added for environment variable access
 use std::str::FromStr;
 
 use kernels::miner::KERNEL;
@@ -8,10 +9,29 @@ use nockapp::nockapp::wire::Wire;
 use nockapp::nockapp::NockAppError;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
-use nockvm::noun::{Atom, D, T};
+use nockvm::noun::{Atom, Cell, D, Noun, T};
 use nockvm_macros::tas;
 use tempfile::tempdir;
-use tracing::{instrument, warn};
+use tracing::{info, instrument, warn};
+
+// Define NONCES_PER_ATTEMPT as a static variable, configurable via environment variable
+static NONCES_PER_ATTEMPT: u64 = {
+    match std::env::var("NOCKCHAIN_NONCES_PER_ATTEMPT") {
+        Ok(val_str) => match val_str.parse::<u64>() {
+            Ok(val) => val,
+            Err(_) => {
+                // Using println! here as tracing might not be initialized yet for static variables.
+                // Consider a more robust logging strategy if this becomes an issue.
+                println!("WARN: Invalid NOCKCHAIN_NONCES_PER_ATTEMPT value '{}', using default 1,000,000.", val_str);
+                1_000_000
+            }
+        },
+        Err(_) => {
+            // println!("INFO: NOCKCHAIN_NONCES_PER_ATTEMPT not set, using default 1,000,000.");
+            1_000_000 // Default if env var is not set
+        }
+    }
+};
 
 pub enum MiningWire {
     Mined,
@@ -161,6 +181,50 @@ pub fn create_mining_driver(
 }
 
 pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
+    // NONCES_PER_ATTEMPT is now a static variable defined at the module level
+
+    let candidate_root = candidate.root();
+    let candidate_cell = match candidate_root.as_cell() {
+        Ok(cell) => cell,
+        Err(_) => {
+            warn!("Mining candidate is not a cell");
+            return;
+        }
+    };
+
+    let length_noun = candidate_cell.head();
+
+    let tail_cell = match candidate_cell.tail().as_cell() {
+        Ok(cell) => cell,
+        Err(_) => {
+            warn!("Mining candidate tail is not a cell");
+            return;
+        }
+    };
+
+    let commitment_noun = tail_cell.head();
+
+    let initial_nonce_atom = match tail_cell.tail().as_atom() {
+        Ok(atom) => atom,
+        Err(_) => {
+            warn!("Mining candidate initial_nonce is not an atom");
+            return;
+        }
+    };
+
+    let initial_nonce_val = match AtomExt::to_u64(&initial_nonce_atom) {
+        Ok(val) => val,
+        Err(_) => {
+            warn!("Failed to convert initial_nonce to u64");
+            return;
+        }
+    };
+
+    info!(
+        "Starting nonce iteration for candidate. Initial nonce: {}",
+        initial_nonce_val
+    );
+
     let snapshot_dir =
         tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
             .await
@@ -173,22 +237,78 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
         Kernel::load_with_hot_state_huge(snapshot_path_buf, jam_paths, KERNEL, &hot_state, false)
             .await
             .expect("Could not load mining kernel");
-    let effects_slab = kernel
-        .poke(MiningWire::Candidate.to_wire(), candidate)
-        .await
-        .expect("Could not poke mining kernel with candidate");
-    for effect in effects_slab.to_vec() {
-        let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
-            drop(effect);
-            continue;
-        };
-        if effect_cell.head().eq_bytes("command") {
-            handle
-                .poke(MiningWire::Mined.to_wire(), effect)
-                .await
-                .expect("Could not poke nockchain with mined PoW");
+
+    for nonce_offset in 0..NONCES_PER_ATTEMPT {
+        let current_nonce_val = initial_nonce_val + nonce_offset;
+        let mut attempt_slab = NounSlab::new();
+
+        let length_noun_copy = attempt_slab
+            .copy_foreign_noun(length_noun)
+            .expect("Failed to copy length_noun");
+        let commitment_noun_copy = attempt_slab
+            .copy_foreign_noun(commitment_noun)
+            .expect("Failed to copy commitment_noun");
+        let current_nonce_atom =
+            Atom::from_u64(&mut attempt_slab, current_nonce_val).expect("Failed to create nonce atom");
+
+        let attempt_noun = T(
+            &mut attempt_slab,
+            &[
+                length_noun_copy,
+                T(
+                    &mut attempt_slab,
+                    &[commitment_noun_copy, current_nonce_atom.as_noun()],
+                ),
+            ],
+        );
+        attempt_slab.set_root(attempt_noun);
+
+        match kernel
+            .poke(MiningWire::Candidate.to_wire(), attempt_slab)
+            .await
+        {
+            Ok(effects_slab) => {
+                for effect in effects_slab.to_vec() {
+                    let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
+                        drop(effect);
+                        continue;
+                    };
+                    if effect_cell.head().eq_bytes("command") {
+                        info!(
+                            "Mined block with nonce: {}! Submitting to nockchain.",
+                            current_nonce_val
+                        );
+                        match handle.poke(MiningWire::Mined.to_wire(), effect.clone()).await {
+                            Ok(_) => {
+                                info!("Successfully submitted mined block for nonce {}", current_nonce_val);
+                                return;
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to poke nockchain with mined PoW for nonce {}: {:?}",
+                                    current_nonce_val, e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Kernel poke failed during nonce iteration for nonce {}: {:?}",
+                    current_nonce_val, e
+                );
+                // Depending on the error, we might want to break or return.
+                // For now, we continue to the next nonce.
+                continue;
+            }
         }
     }
+
+    info!(
+        "Finished iterating {} nonces starting from {} (up to {} attempts), no block mined.",
+        NONCES_PER_ATTEMPT, initial_nonce_val, NONCES_PER_ATTEMPT // Clarified log
+    );
 }
 
 #[instrument(skip(handle, pubkey))]
