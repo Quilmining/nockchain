@@ -201,6 +201,7 @@ pub async fn initialize_hoonc_(
         &[],
         "hoonc",
         Some(data_dir),
+        None,
     )
     .await?;
     let mut slab = NounSlab::new();

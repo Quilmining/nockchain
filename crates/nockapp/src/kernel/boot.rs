@@ -4,6 +4,7 @@ use crate::{default_data_dir, NockApp};
 use chrono;
 use clap::{arg, command, ColorChoice, Parser};
 use nockvm::jets::hot::HotEntry;
+use crate::utils::NOCK_STACK_SIZE;
 use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, Level};
@@ -211,6 +212,7 @@ pub async fn setup(
     hot_state: &[HotEntry],
     name: &str,
     data_dir: Option<PathBuf>,
+    nock_stack_size: Option<usize>,
 ) -> Result<NockApp, Box<dyn std::error::Error>> {
     let result = setup_(
         jam,
@@ -218,6 +220,7 @@ pub async fn setup(
         hot_state,
         name,
         data_dir,
+        nock_stack_size.unwrap_or(NOCK_STACK_SIZE),
     )
     .await?;
     match result {
@@ -235,6 +238,7 @@ pub async fn setup_(
     hot_state: &[HotEntry],
     name: &str,
     data_dir: Option<PathBuf>,
+    nock_stack_size: usize,
 ) -> Result<SetupResult, Box<dyn std::error::Error>> {
     let data_dir = if let Some(data_path) = data_dir.clone() {
         data_path.join(name)
@@ -270,10 +274,26 @@ pub async fn setup_(
     let mut kernel = if let Some(state_path) = cli.state_jam {
         let state_bytes = fs::read(&state_path)?;
         debug!("kernel: loading state from jam file: {:?}", state_path);
-        Kernel::load_with_kernel_state(pma_dir, jam_paths, jam, &state_bytes, hot_state, cli.trace)
+        Kernel::load_with_kernel_state(
+            pma_dir,
+            jam_paths,
+            jam,
+            &state_bytes,
+            hot_state,
+            cli.trace,
+            nock_stack_size,
+        )
             .await?
     } else {
-        Kernel::load_with_hot_state(pma_dir, jam_paths, jam, hot_state, cli.trace).await?
+        Kernel::load_with_hot_state(
+            pma_dir,
+            jam_paths,
+            jam,
+            hot_state,
+            cli.trace,
+            nock_stack_size,
+        )
+        .await?
     };
 
     if let Some(export_path) = cli.export_state_jam.clone() {
