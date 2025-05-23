@@ -25,7 +25,7 @@ use tracing::{debug, error, info, warn};
 use crate::kernel::checkpoint::{Checkpoint, ExportedState, JamPaths, JammedCheckpoint};
 use crate::nockapp::wire::{wire_to_noun, WireRepr};
 use crate::noun::slam;
-use crate::utils::{create_context, current_da, NOCK_STACK_SIZE, NOCK_STACK_SIZE_HUGE};
+use crate::utils::{create_context, current_da};
 use crate::{AtomExt, CrownError, NounExt, Result, ToBytesExt};
 use bincode::config::Configuration;
 
@@ -581,13 +581,18 @@ impl Kernel {
         kernel: &[u8],
         hot_state: &[HotEntry],
         trace: bool,
+        nock_stack_size: usize,
     ) -> Result<Self> {
         let jam_paths_arc = Arc::new(jam_paths);
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let pma_dir_arc = Arc::new(pma_dir);
         let serf = SerfThread::new(
-            NOCK_STACK_SIZE, jam_paths_arc, kernel_vec, hot_state_vec, trace,
+            nock_stack_size,
+            jam_paths_arc,
+            kernel_vec,
+            hot_state_vec,
+            trace,
         )
         .await?;
         Ok(Self {
@@ -602,13 +607,18 @@ impl Kernel {
         kernel: &[u8],
         hot_state: &[HotEntry],
         trace: bool,
+        nock_stack_size: usize,
     ) -> Result<Self> {
         let jam_paths_arc = Arc::new(jam_paths);
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let pma_dir_arc = Arc::new(pma_dir);
         let serf = SerfThread::new(
-            NOCK_STACK_SIZE_HUGE, jam_paths_arc, kernel_vec, hot_state_vec, trace,
+            nock_stack_size,
+            jam_paths_arc,
+            kernel_vec,
+            hot_state_vec,
+            trace,
         )
         .await?;
         Ok(Self {
@@ -633,8 +643,9 @@ impl Kernel {
         jam_paths: JamPaths,
         kernel: &[u8],
         trace: bool,
+        nock_stack_size: usize,
     ) -> Result<Self> {
-        Self::load_with_hot_state(pma_dir, jam_paths, kernel, &Vec::new(), trace).await
+        Self::load_with_hot_state(pma_dir, jam_paths, kernel, &Vec::new(), trace, nock_stack_size).await
     }
 
     /// Loads a kernel with state from jammed bytes
@@ -645,9 +656,17 @@ impl Kernel {
         state_bytes: &[u8],
         hot_state: &[HotEntry],
         trace: bool,
+        nock_stack_size: usize,
     ) -> Result<Self> {
-        let kernel =
-            Self::load_with_hot_state(pma_dir, jam_paths, kernel_jam, hot_state, trace).await?;
+        let kernel = Self::load_with_hot_state(
+            pma_dir,
+            jam_paths,
+            kernel_jam,
+            hot_state,
+            trace,
+            nock_stack_size,
+        )
+        .await?;
 
         match kernel
             .serf
@@ -1243,6 +1262,7 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use tempfile::TempDir;
+    use crate::DEFAULT_NOCK_STACK_SIZE;
 
     async fn setup_kernel(jam: &str) -> (Kernel, TempDir) {
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -1254,7 +1274,13 @@ mod tests {
             .join(jam);
         let jam_bytes =
             fs::read(jam_path).unwrap_or_else(|_| panic!("Failed to read {} file", jam));
-        let kernel = Kernel::load(snap_dir, jam_paths, &jam_bytes, false)
+        let kernel = Kernel::load(
+            snap_dir,
+            jam_paths,
+            &jam_bytes,
+            false,
+            DEFAULT_NOCK_STACK_SIZE,
+        )
             .await
             .expect("Could not load kernel");
         (kernel, temp_dir)

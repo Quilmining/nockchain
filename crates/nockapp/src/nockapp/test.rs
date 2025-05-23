@@ -25,7 +25,13 @@ pub async fn setup_nockapp(jam: &str) -> (TempDir, NockApp) {
         .find_map(|path| fs::read(path).ok())
         .unwrap_or_else(|| panic!("Failed to read {} file from any known location", jam));
 
-    let kernel = Kernel::load(snap_dir, jam_paths, &jam_bytes, false)
+    let kernel = Kernel::load(
+        snap_dir,
+        jam_paths,
+        &jam_bytes,
+        false,
+        DEFAULT_NOCK_STACK_SIZE,
+    )
         .await
         .expect("Could not load kernel");
     (
@@ -39,7 +45,7 @@ pub mod tests {
     use super::setup_nockapp;
     use crate::nockapp::wire::{SystemWire, Wire};
     use crate::noun::slab::{slab_equality, slab_noun_equality, NounSlab};
-    use crate::utils::NOCK_STACK_SIZE;
+    use crate::DEFAULT_NOCK_STACK_SIZE;
     use crate::{NockApp, NounExt};
     use bytes::Bytes;
     use nockvm::mem::NockStack;
@@ -106,7 +112,7 @@ pub mod tests {
         nockapp.tasks.reopen();
         // Shutdown the runtime immediately
         runtime.shutdown_timeout(std::time::Duration::from_secs(0));
-        let mut stack = NockStack::new(NOCK_STACK_SIZE, 0);
+        let mut stack = NockStack::new(DEFAULT_NOCK_STACK_SIZE, 0);
         let checkpoint = nockapp
             .kernel
             .serf
@@ -143,7 +149,7 @@ pub mod tests {
         // Permit should be dropped
 
         // A valid checkpoint should exist in one of the jam files
-        let mut checkpoint_stack = NockStack::new(NOCK_STACK_SIZE, 0);
+        let mut checkpoint_stack = NockStack::new(DEFAULT_NOCK_STACK_SIZE, 0);
         let checkpoint = jam_paths.load_checkpoint(&mut checkpoint_stack);
         assert!(checkpoint.is_ok());
         let checkpoint = checkpoint.unwrap_or_else(|err| {
@@ -220,7 +226,7 @@ pub mod tests {
 
         // A valid checkpoint should exist in one of the jam files
         let jam_paths = &nockapp.kernel.serf.jam_paths;
-        let mut checkpoint_stack = NockStack::new(NOCK_STACK_SIZE, 0);
+        let mut checkpoint_stack = NockStack::new(DEFAULT_NOCK_STACK_SIZE, 0);
         let checkpoint = jam_paths.load_checkpoint(&mut checkpoint_stack);
         assert!(checkpoint.is_ok());
         let checkpoint = checkpoint.unwrap_or_else(|err| {
@@ -271,7 +277,7 @@ pub mod tests {
         let (_temp, mut nockapp) = setup_nockapp("test-ker.jam").await;
         assert_eq!(nockapp.kernel.serf.event_number.load(Ordering::SeqCst), 0);
         let jam_paths = nockapp.kernel.serf.jam_paths.clone();
-        let mut stack = NockStack::new(NOCK_STACK_SIZE, 0);
+        let mut stack = NockStack::new(DEFAULT_NOCK_STACK_SIZE, 0);
 
         for i in 1..4 {
             // Poke to increment the state
@@ -388,7 +394,7 @@ pub mod tests {
         assert!(!invalid.validate());
 
         // The invalid checkpoint has a higher event number than the valid checkpoint
-        let mut checkpoint_stack = NockStack::new(NOCK_STACK_SIZE, 0);
+        let mut checkpoint_stack = NockStack::new(DEFAULT_NOCK_STACK_SIZE, 0);
         let valid = jam_paths
             .load_checkpoint(&mut checkpoint_stack)
             .unwrap_or_else(|err| {
@@ -442,7 +448,7 @@ pub mod tests {
     async fn test_jam_equality_stack() {
         let (_temp, nockapp) = setup_nockapp("test-ker.jam").await;
         let kernel = nockapp.kernel;
-        let mut jam_stack = NockStack::new(NOCK_STACK_SIZE, 0);
+        let mut jam_stack = NockStack::new(DEFAULT_NOCK_STACK_SIZE, 0);
         let arvo_slab = kernel
             .serf
             .get_kernel_state_slab()
@@ -519,7 +525,7 @@ pub mod tests {
     async fn test_jam_equality_slab_stack() {
         let (_temp, nockapp) = setup_nockapp("test-ker.jam").await;
         let kernel = nockapp.kernel;
-        let mut stack = NockStack::new(NOCK_STACK_SIZE, 0);
+        let mut stack = NockStack::new(DEFAULT_NOCK_STACK_SIZE, 0);
         let state_slab = kernel
             .serf
             .get_kernel_state_slab()

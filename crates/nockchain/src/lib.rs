@@ -241,6 +241,9 @@ pub struct NockchainCli {
     pub max_system_memory_fraction: Option<f64>,
     #[arg(long, help = "Maximum process memory for connection limits (bytes)")]
     pub max_system_memory_bytes: Option<usize>,
+
+    #[arg(long, help = "Size of the Nock stack in MB", default_value_t = 1024)]
+    pub nock_stack_size_mb: usize,
 }
 
 impl NockchainCli {
@@ -364,14 +367,32 @@ pub async fn init_with_kernel(
         cli.validate()?;
     }
 
-    let mut nockapp = boot::setup(
+    let boot_cli = cli
+        .as_ref()
+        .map(|c| c.nockapp_cli.clone())
+        .unwrap_or_else(|| boot::default_boot_cli(false));
+    let stack_size = cli
+        .as_ref()
+        .map(|c| c.nock_stack_size_mb)
+        .unwrap_or(1024)
+        * 1024
+        * 1024;
+    let result = boot::setup_(
         kernel_jam,
-        cli.as_ref().map(|c| c.nockapp_cli.clone()),
+        boot_cli,
         hot_state,
         "nockchain",
         None,
+        stack_size,
     )
     .await?;
+    let mut nockapp = match result {
+        boot::SetupResult::App(app) => app,
+        boot::SetupResult::ExportedState => {
+            info!("Exiting after successful state export");
+            std::process::exit(0);
+        }
+    };
 
     let keypair = {
         let keypair_path = Path::new(IDENTITY_PATH);
@@ -566,8 +587,12 @@ pub async fn init_with_kernel(
 
     let mine = cli.as_ref().map_or(false, |c| c.mine);
 
-    let mining_driver =
-        crate::mining::create_mining_driver(mining_config, mine, Some(mining_init_tx));
+    let mining_driver = crate::mining::create_mining_driver(
+        mining_config,
+        mine,
+        stack_size,
+        Some(mining_init_tx),
+    );
     nockapp.add_io_driver(mining_driver).await;
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(

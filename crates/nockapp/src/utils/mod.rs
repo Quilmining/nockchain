@@ -33,12 +33,6 @@ const S1: u128 = 18446744073709551616;
 
 pub const NOCK_STACK_1KB: usize = 1 << 7;
 
-// nock stack size
-pub const NOCK_STACK_SIZE: usize = (NOCK_STACK_1KB << 10 << 10) * 8; // 8GB
-
-// HUGE nock stack size
-pub const NOCK_STACK_SIZE_HUGE: usize = (NOCK_STACK_1KB << 10 << 10) * 128; // 32GB
-
 /**
  *   ::  +from-unix: unix seconds to @da
  *   ::
