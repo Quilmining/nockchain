@@ -15,7 +15,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use crossbeam_queue::SegQueue;
 use tokio::sync::Notify;
-use num_cpus;
 use tracing::{instrument, warn};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -91,8 +90,6 @@ pub fn create_mining_driver(
     mining_workers: usize,
 
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    workers: usize,
-
 ) -> IODriverFn {
     Box::new(move |mut handle| {
         Box::pin(async move {
@@ -133,7 +130,7 @@ pub fn create_mining_driver(
             let notify = Arc::new(Notify::new());
 
             if mine {
-                let num_kernels = workers.unwrap_or_else(num_cpus::get);
+                let num_kernels = mining_workers;
                 for _ in 0..num_kernels {
                     let snapshot_dir = tokio::task::spawn_blocking(|| {
                         tempdir().expect("Failed to create temporary directory")
