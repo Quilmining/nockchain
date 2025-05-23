@@ -15,6 +15,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use num_cpus;
 use tracing::{instrument, warn};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 
 pub enum MiningWire {
     Mined,
@@ -85,7 +88,8 @@ pub fn create_mining_driver(
     mine: bool,
     workers: Option<usize>,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    nock_stack_size: usize,
+    workers: usize,
+
 ) -> IODriverFn {
     Box::new(move |mut handle| {
         Box::pin(async move {
@@ -150,52 +154,41 @@ pub fn create_mining_driver(
                 return Ok(());
             }
 
-            let mut next_attempt: Option<NounSlab> = None;
-            let mut current_attempt: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+            let (candidate_tx, candidate_rx) = mpsc::unbounded_channel::<NounSlab>();
+            let candidate_rx = Arc::new(Mutex::new(candidate_rx));
+
+            for _ in 0..workers.max(1) {
+                let rx = Arc::clone(&candidate_rx);
+                let (cur_handle, mut worker_handle) = handle.dup();
+                handle = cur_handle;
+                tokio::spawn(async move {
+                    while let Some(candidate) = {
+                        let mut guard = rx.lock().await;
+                        guard.recv().await
+                    } {
+                        let (next_handle, attempt_handle) = worker_handle.dup();
+                        worker_handle = next_handle;
+                        mining_attempt(candidate, attempt_handle).await;
+                    }
+                });
+            }
 
             loop {
-                tokio::select! {
-                    effect_res = handle.next_effect() => {
-                        let Ok(effect) = effect_res else {
-                          warn!("Error receiving effect in mining driver: {effect_res:?}");
-                        continue;
-                        };
-                        let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
-                            drop(effect);
-                            continue;
-                        };
+                let effect_res = handle.next_effect().await;
+                let Ok(effect) = effect_res else {
+                    warn!("Error receiving effect in mining driver: {effect_res:?}");
+                    continue;
+                };
+                let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
+                    drop(effect);
+                    continue;
+                };
 
-                        if effect_cell.head().eq_bytes("mine") {
-                            let candidate_slab = {
-                                let mut slab = NounSlab::new();
-                                slab.copy_into(effect_cell.tail());
-                                slab
-                            };
-                            if !current_attempt.is_empty() {
-                                next_attempt = Some(candidate_slab);
-                            } else {
-                                let (cur_handle, attempt_handle) = handle.dup();
-                                handle = cur_handle;
-                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, nock_stack_size));
+                if effect_cell.head().eq_bytes("mine") {
+                    let mut slab = NounSlab::new();
+                    slab.copy_into(effect_cell.tail());
+                    let _ = candidate_tx.send(slab);
 
-                            }
-                        }
-                    },
-                    mining_attempt_res = current_attempt.join_next(), if !current_attempt.is_empty()  => {
-                        if let Some(Err(e)) = mining_attempt_res {
-                            warn!("Error during mining attempt: {e:?}");
-                        }
-                        let Some(candidate_slab) = next_attempt else {
-                            continue;
-                        };
-                        next_attempt = None;
-                        let (cur_handle, attempt_handle) = handle.dup();
-                        handle = cur_handle;
-
-                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, nock_stack_size));
-
-
-                    }
                 }
             }
         })

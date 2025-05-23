@@ -178,6 +178,8 @@ pub struct NockchainCli {
     pub npc_socket: String,
     #[arg(long, help = "Mine in-kernel", default_value = "false")]
     pub mine: bool,
+    #[arg(long, help = "Number of mining worker tasks", default_value_t = 1)]
+    pub mining_workers: usize,
     #[arg(
         long,
         help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"
@@ -575,15 +577,14 @@ pub async fn init_with_kernel(
     });
 
     let mine = cli.as_ref().map_or(false, |c| c.mine);
+    let mining_workers = cli.as_ref().map_or(1, |c| c.mining_workers);
 
-    let huge_stack_size = stack_size_bytes
-        * (nockapp::utils::NOCK_STACK_SIZE_HUGE / nockapp::utils::NOCK_STACK_SIZE);
 
     let mining_driver = crate::mining::create_mining_driver(
         mining_config,
         mine,
         Some(mining_init_tx),
-        huge_stack_size,
+        mining_workers,
     );
 
     nockapp.add_io_driver(mining_driver).await;
