@@ -747,6 +747,7 @@ async fn main() -> Result<(), NockAppError> {
         prover_hot_state.as_slice(),
         "wallet",
         Some(data_dir),
+        None,
     )
     .await
     .map_err(|e| CrownError::Unknown(format!("Kernel setup failed: {}", e)))?;
@@ -932,6 +933,7 @@ mod tests {
             prover_hot_state.as_slice(),
             "wallet",
             None,
+            None,
         )
         .await
         .map_err(|e| CrownError::Unknown(e.to_string()))?;
@@ -970,6 +972,7 @@ mod tests {
             Some(cli.clone()),
             prover_hot_state.as_slice(),
             "wallet",
+            None,
             None,
         )
         .await
@@ -1014,7 +1017,7 @@ mod tests {
     async fn test_sign_tx() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1069,7 +1072,7 @@ mod tests {
     async fn test_gen_master_privkey() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1090,7 +1093,7 @@ mod tests {
     async fn test_gen_master_pubkey() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1112,7 +1115,7 @@ mod tests {
     async fn test_import_keys() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&["--new"]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1152,7 +1155,7 @@ mod tests {
     async fn test_simple_scan() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1176,7 +1179,7 @@ mod tests {
     async fn test_simple_spend_multisig_format() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1205,7 +1208,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     async fn test_simple_spend_single_sig_format() -> Result<(), NockAppError> {
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         init_tracing();
@@ -1247,7 +1250,7 @@ mod tests {
     async fn test_update_balance() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&["--new"]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1266,7 +1269,7 @@ mod tests {
     async fn test_list_notes() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1286,7 +1289,7 @@ mod tests {
     async fn test_make_tx_from_draft() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None, None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);

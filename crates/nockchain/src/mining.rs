@@ -17,6 +17,9 @@ use crossbeam_queue::SegQueue;
 use tokio::sync::Notify;
 use num_cpus;
 use tracing::{instrument, warn};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 
 pub enum MiningWire {
     Mined,
@@ -86,7 +89,10 @@ pub fn create_mining_driver(
     mining_config: Option<Vec<MiningKeyConfig>>,
     mine: bool,
     mining_workers: usize,
+
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    workers: usize,
+
 ) -> IODriverFn {
     Box::new(move |mut handle| {
         Box::pin(async move {
@@ -127,7 +133,7 @@ pub fn create_mining_driver(
             let notify = Arc::new(Notify::new());
 
             if mine {
-                let num_kernels = num_cpus::get();
+                let num_kernels = workers.unwrap_or_else(num_cpus::get);
                 for _ in 0..num_kernels {
                     let snapshot_dir = tokio::task::spawn_blocking(|| {
                         tempdir().expect("Failed to create temporary directory")
@@ -142,6 +148,7 @@ pub fn create_mining_driver(
                         KERNEL,
                         &prover_hot_state,
                         false,
+                        nock_stack_size,
                     )
                     .await
                     .expect("Could not load mining kernel");
@@ -162,6 +169,7 @@ pub fn create_mining_driver(
                 return Ok(());
             }
 
+
             loop {
                 let effect_res = handle.next_effect().await;
                 let Ok(effect) = effect_res else {
@@ -181,6 +189,7 @@ pub fn create_mining_driver(
                     };
                     queue.push(candidate_slab);
                     notify.notify_one();
+
                 }
             }
         })
@@ -190,11 +199,28 @@ pub fn create_mining_driver(
 pub async fn mining_attempt(
     candidate: NounSlab,
     handle: NockAppHandle,
-    kernel_pool: Arc<Mutex<Vec<MiningKernel>>>,
+    nock_stack_size: usize,
 ) -> () {
-    let mut kernel_wrapper = kernel_pool.lock().await.pop().expect("kernel pool empty");
-    let effects_slab = kernel_wrapper
-        .kernel
+    let snapshot_dir =
+        tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
+            .await
+            .expect("Failed to create temporary directory");
+    let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
+    let snapshot_path_buf = snapshot_dir.path().to_path_buf();
+    let jam_paths = JamPaths::new(snapshot_dir.path());
+    // Spawns a new std::thread for this mining attempt
+    let kernel = Kernel::load_with_hot_state_huge(
+        snapshot_path_buf,
+        jam_paths,
+        KERNEL,
+        &hot_state,
+        false,
+        nock_stack_size,
+    )
+        .await
+        .expect("Could not load mining kernel");
+    let effects_slab = kernel
+
         .poke(MiningWire::Candidate.to_wire(), candidate)
         .await
         .expect("Could not poke mining kernel with candidate");

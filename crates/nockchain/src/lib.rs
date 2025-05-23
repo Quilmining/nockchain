@@ -179,6 +179,8 @@ pub struct NockchainCli {
     pub npc_socket: String,
     #[arg(long, help = "Mine in-kernel", default_value = "false")]
     pub mine: bool,
+    #[arg(long, help = "Number of mining worker tasks", default_value_t = 1)]
+    pub mining_workers: usize,
     #[arg(
         long,
         help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"
@@ -214,6 +216,8 @@ pub struct NockchainCli {
     pub btc_password: Option<String>,
     #[arg(long, help = "Auth cookie path for Bitcoin Core RPC")]
     pub btc_auth_cookie: Option<String>,
+    #[arg(long, help = "Nock stack size in MB")]
+    pub nock_stack_size_mb: Option<usize>,
     #[arg(long, short, help = "Initial peer", action = ArgAction::Append)]
     pub peer: Vec<String>,
     #[arg(long, help = "Allowed peer IDs file")]
@@ -244,6 +248,10 @@ pub struct NockchainCli {
     pub max_system_memory_fraction: Option<f64>,
     #[arg(long, help = "Maximum process memory for connection limits (bytes)")]
     pub max_system_memory_bytes: Option<usize>,
+
+    #[arg(long, help = "Size of the Nock stack in MB", default_value_t = 1024)]
+    pub nock_stack_size_mb: usize,
+
 }
 
 impl NockchainCli {
@@ -367,14 +375,34 @@ pub async fn init_with_kernel(
         cli.validate()?;
     }
 
-    let mut nockapp = boot::setup(
+    let boot_cli = cli
+        .as_ref()
+        .map(|c| c.nockapp_cli.clone())
+        .unwrap_or_else(|| boot::default_boot_cli(false));
+    let stack_size = cli
+        .as_ref()
+        .map(|c| c.nock_stack_size_mb)
+        .unwrap_or(1024)
+        * 1024
+        * 1024;
+    let result = boot::setup_(
+
         kernel_jam,
-        cli.as_ref().map(|c| c.nockapp_cli.clone()),
+        boot_cli,
         hot_state,
         "nockchain",
         None,
+        stack_size,
+
     )
     .await?;
+    let mut nockapp = match result {
+        boot::SetupResult::App(app) => app,
+        boot::SetupResult::ExportedState => {
+            info!("Exiting after successful state export");
+            std::process::exit(0);
+        }
+    };
 
     let keypair = {
         let keypair_path = Path::new(IDENTITY_PATH);
@@ -572,6 +600,7 @@ pub async fn init_with_kernel(
 
     let mining_driver =
         crate::mining::create_mining_driver(mining_config, mine, mining_workers, Some(mining_init_tx));
+
     nockapp.add_io_driver(mining_driver).await;
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(
