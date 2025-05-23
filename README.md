@@ -107,6 +107,8 @@ To run a Nockchain node and mine to a pubkey:
 nockchain --mining_pubkey <your_pubkey> --mine
 ```
 
+Specify the number of threads used per mining attempt with `--miner_threads <n>` (defaults to the number of CPUs).
+
 For launch, make sure you run in a fresh working directory that does not include a .data.nockchain file from testing.
 
 

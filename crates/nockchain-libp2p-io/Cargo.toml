@@ -36,3 +36,5 @@ serde_bytes = { workspace = true, features = ["alloc"] }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 void = { workspace = true }
+rayon.workspace = true
+num_cpus.workspace = true

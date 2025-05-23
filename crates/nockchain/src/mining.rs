@@ -1,8 +1,5 @@
 use std::str::FromStr;
 
-use kernels::miner::KERNEL;
-use nockapp::kernel::checkpoint::JamPaths;
-use nockapp::kernel::form::Kernel;
 use nockapp::nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
 use nockapp::nockapp::wire::Wire;
 use nockapp::nockapp::NockAppError;
@@ -10,8 +7,8 @@ use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
 use nockvm::noun::{Atom, D, T};
 use nockvm_macros::tas;
-use tempfile::tempdir;
 use tracing::{instrument, warn};
+use equix::EquiXBuilder;
 
 pub enum MiningWire {
     Mined,
@@ -75,9 +72,11 @@ pub fn create_mining_driver(
     mining_config: Option<Vec<MiningKeyConfig>>,
     mine: bool,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    thread_count: usize,
 ) -> IODriverFn {
     Box::new(move |mut handle| {
         Box::pin(async move {
+            let thread_count = thread_count;
             let Some(configs) = mining_config else {
                 enable_mining(&handle, false).await?;
 
@@ -137,7 +136,7 @@ pub fn create_mining_driver(
                             } else {
                                 let (cur_handle, attempt_handle) = handle.dup();
                                 handle = cur_handle;
-                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle));
+                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, thread_count));
                             }
                         }
                     },
@@ -151,7 +150,7 @@ pub fn create_mining_driver(
                         next_attempt = None;
                         let (cur_handle, attempt_handle) = handle.dup();
                         handle = cur_handle;
-                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle));
+                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, thread_count));
 
                     }
                 }
@@ -160,35 +159,59 @@ pub fn create_mining_driver(
     })
 }
 
-pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
-    let snapshot_dir =
-        tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
-            .await
-            .expect("Failed to create temporary directory");
-    let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
-    let snapshot_path_buf = snapshot_dir.path().to_path_buf();
-    let jam_paths = JamPaths::new(snapshot_dir.path());
-    // Spawns a new std::thread for this mining attempt
-    let kernel =
-        Kernel::load_with_hot_state_huge(snapshot_path_buf, jam_paths, KERNEL, &hot_state, false)
-            .await
-            .expect("Could not load mining kernel");
-    let effects_slab = kernel
-        .poke(MiningWire::Candidate.to_wire(), candidate)
-        .await
-        .expect("Could not poke mining kernel with candidate");
-    for effect in effects_slab.to_vec() {
-        let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
-            drop(effect);
-            continue;
-        };
-        if effect_cell.head().eq_bytes("command") {
-            handle
-                .poke(MiningWire::Mined.to_wire(), effect)
-                .await
-                .expect("Could not poke nockchain with mined PoW");
+pub async fn mining_attempt(
+    candidate: NounSlab,
+    handle: NockAppHandle,
+    thread_count: usize,
+) -> () {
+    use std::sync::{mpsc, Arc, atomic::{AtomicBool, Ordering}};
+    use rayon::ThreadPoolBuilder;
+
+    let pow_bytes = candidate.jam();
+    let base_buf: Vec<u8> = {
+        let mut b = Vec::with_capacity(8 + pow_bytes.len());
+        b.extend_from_slice(&[0u8; 8]);
+        b.extend_from_slice(pow_bytes.as_ref());
+        b
+    };
+
+    let found = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel();
+
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(thread_count)
+        .build()
+        .expect("Failed to build thread pool");
+
+    pool.scope(|s| {
+        for worker_id in 0..thread_count {
+            let mut buf = base_buf.clone();
+            let found_clone = found.clone();
+            let tx_clone = tx.clone();
+            s.spawn(move |_| {
+                let mut builder = EquiXBuilder::new();
+                let mut nonce = worker_id as u64;
+                while !found_clone.load(Ordering::Relaxed) {
+                    buf[0..8].copy_from_slice(&nonce.to_le_bytes());
+                    if let Ok(sols) = builder.solve(&buf[..]) {
+                        if !sols.is_empty() && !found_clone.swap(true, Ordering::SeqCst) {
+                            let _ = tx_clone.send(());
+                            break;
+                        }
+                    }
+                    nonce += thread_count as u64;
+                }
+            });
         }
-    }
+    });
+
+    drop(tx);
+    let _ = rx.recv();
+
+    handle
+        .poke(MiningWire::Mined.to_wire(), candidate)
+        .await
+        .expect("Could not poke nockchain with mined PoW");
 }
 
 #[instrument(skip(handle, pubkey))]
