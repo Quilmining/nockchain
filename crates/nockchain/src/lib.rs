@@ -30,6 +30,7 @@ use nockvm::jets::hot::HotEntry;
 use nockvm::noun::{D, T};
 use nockvm_macros::tas;
 use tracing::{debug, info, instrument};
+use num_cpus;
 
 use crate::mining::MiningKeyConfig;
 
@@ -191,6 +192,8 @@ pub struct NockchainCli {
         value_delimiter = ',',
     )]
     pub mining_key_adv: Option<Vec<MiningKeyConfig>>,
+    #[arg(long, help = "Number of parallel mining workers", default_value_t = num_cpus::get())]
+    pub mining_workers: usize,
     #[arg(long, help = "Watch for genesis block", default_value = "false")]
     pub genesis_watcher: bool,
     #[arg(long, help = "Mine genesis block", default_value = "false")]
@@ -565,9 +568,10 @@ pub async fn init_with_kernel(
     });
 
     let mine = cli.as_ref().map_or(false, |c| c.mine);
+    let mining_workers = cli.as_ref().map_or(num_cpus::get(), |c| c.mining_workers);
 
     let mining_driver =
-        crate::mining::create_mining_driver(mining_config, mine, Some(mining_init_tx));
+        crate::mining::create_mining_driver(mining_config, mine, mining_workers, Some(mining_init_tx));
     nockapp.add_io_driver(mining_driver).await;
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(

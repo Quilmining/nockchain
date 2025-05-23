@@ -13,6 +13,8 @@ use nockvm_macros::tas;
 use tempfile::{tempdir, TempDir};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use crossbeam_queue::SegQueue;
+use tokio::sync::Notify;
 use num_cpus;
 use tracing::{instrument, warn};
 
@@ -83,6 +85,7 @@ impl FromStr for MiningKeyConfig {
 pub fn create_mining_driver(
     mining_config: Option<Vec<MiningKeyConfig>>,
     mine: bool,
+    mining_workers: usize,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
 ) -> IODriverFn {
     Box::new(move |mut handle| {
@@ -120,6 +123,9 @@ pub fn create_mining_driver(
                 })?;
             }
 
+            let queue: Arc<SegQueue<NounSlab>> = Arc::new(SegQueue::new());
+            let notify = Arc::new(Notify::new());
+
             if mine {
                 let num_kernels = num_cpus::get();
                 for _ in 0..num_kernels {
@@ -144,53 +150,37 @@ pub fn create_mining_driver(
                         .await
                         .push(MiningKernel { kernel, _dir: snapshot_dir });
                 }
+                for _ in 0..mining_workers {
+                    let q = queue.clone();
+                    let n = notify.clone();
+                    let kernel_pool = kernel_pool.clone();
+                    let (cur_handle, worker_handle) = handle.dup();
+                    handle = cur_handle;
+                    tokio::spawn(mining_worker_loop(q, n.clone(), worker_handle, kernel_pool));
+                }
             } else {
                 return Ok(());
             }
 
-            let mut next_attempt: Option<NounSlab> = None;
-            let mut current_attempt: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
-
             loop {
-                tokio::select! {
-                    effect_res = handle.next_effect() => {
-                        let Ok(effect) = effect_res else {
-                          warn!("Error receiving effect in mining driver: {effect_res:?}");
-                        continue;
-                        };
-                        let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
-                            drop(effect);
-                            continue;
-                        };
+                let effect_res = handle.next_effect().await;
+                let Ok(effect) = effect_res else {
+                    warn!("Error receiving effect in mining driver: {effect_res:?}");
+                    continue;
+                };
+                let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
+                    drop(effect);
+                    continue;
+                };
 
-                        if effect_cell.head().eq_bytes("mine") {
-                            let candidate_slab = {
-                                let mut slab = NounSlab::new();
-                                slab.copy_into(effect_cell.tail());
-                                slab
-                            };
-                            if !current_attempt.is_empty() {
-                                next_attempt = Some(candidate_slab);
-                            } else {
-                                let (cur_handle, attempt_handle) = handle.dup();
-                                handle = cur_handle;
-                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, kernel_pool.clone()));
-                            }
-                        }
-                    },
-                    mining_attempt_res = current_attempt.join_next(), if !current_attempt.is_empty()  => {
-                        if let Some(Err(e)) = mining_attempt_res {
-                            warn!("Error during mining attempt: {e:?}");
-                        }
-                        let Some(candidate_slab) = next_attempt else {
-                            continue;
-                        };
-                        next_attempt = None;
-                        let (cur_handle, attempt_handle) = handle.dup();
-                        handle = cur_handle;
-                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, kernel_pool.clone()));
-
-                    }
+                if effect_cell.head().eq_bytes("mine") {
+                    let candidate_slab = {
+                        let mut slab = NounSlab::new();
+                        slab.copy_into(effect_cell.tail());
+                        slab
+                    };
+                    queue.push(candidate_slab);
+                    notify.notify_one();
                 }
             }
         })
@@ -221,6 +211,25 @@ pub async fn mining_attempt(
         }
     }
     kernel_pool.lock().await.push(kernel_wrapper);
+}
+
+async fn mining_worker_loop(
+    queue: Arc<SegQueue<NounSlab>>,
+    notify: Arc<Notify>,
+    mut handle: NockAppHandle,
+    kernel_pool: Arc<Mutex<Vec<MiningKernel>>>,
+) {
+    loop {
+        let candidate = loop {
+            if let Some(c) = queue.pop() {
+                break c;
+            }
+            notify.notified().await;
+        };
+        let (cur_handle, attempt_handle) = handle.dup();
+        handle = cur_handle;
+        mining_attempt(candidate, attempt_handle, kernel_pool.clone()).await;
+    }
 }
 
 #[instrument(skip(handle, pubkey))]
