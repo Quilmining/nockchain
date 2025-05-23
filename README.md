@@ -109,12 +109,12 @@ nockchain --mining_pubkey <your_pubkey> --mine --mining-workers <num_workers>
 
 For launch, make sure you run in a fresh working directory that does not include a .data.nockchain file from testing.
 
-### Memory Tuning
+### Nock Stack Size
 
-The Nock VM uses a large stack. You can adjust its size with `--nock-stack-size-mb`.
-The default is 1024 MB. Mining attempts allocate a stack 16× this size.
-Reducing the value lowers memory usage and enables more parallel mining
-threads, but setting it too low may cause stack overflows.
+Use the `--nock-stack-size-mb` flag to control how much memory is reserved for the
+Nock runtime stack. The default is `1024` (1 GB). On most machines we recommend at
+least `4096` and miners may wish to use `16384`.
+
 
 
 ## FAQ

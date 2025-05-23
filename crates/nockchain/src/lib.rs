@@ -245,8 +245,10 @@ pub struct NockchainCli {
     pub max_system_memory_fraction: Option<f64>,
     #[arg(long, help = "Maximum process memory for connection limits (bytes)")]
     pub max_system_memory_bytes: Option<usize>,
-    #[arg(long, help = "Number of mining workers")]
-    pub mining_workers: Option<usize>,
+
+    #[arg(long, help = "Size of the Nock stack in MB", default_value_t = 1024)]
+    pub nock_stack_size_mb: usize,
+
 }
 
 impl NockchainCli {
@@ -370,20 +372,34 @@ pub async fn init_with_kernel(
         cli.validate()?;
     }
 
-    let stack_size_bytes = cli
+    let boot_cli = cli
         .as_ref()
-        .and_then(|c| c.nock_stack_size_mb.map(|mb| mb * 1024 * 1024))
-        .unwrap_or(nockapp::utils::NOCK_STACK_SIZE);
+        .map(|c| c.nockapp_cli.clone())
+        .unwrap_or_else(|| boot::default_boot_cli(false));
+    let stack_size = cli
+        .as_ref()
+        .map(|c| c.nock_stack_size_mb)
+        .unwrap_or(1024)
+        * 1024
+        * 1024;
+    let result = boot::setup_(
 
-    let mut nockapp = boot::setup(
         kernel_jam,
-        cli.as_ref().map(|c| c.nockapp_cli.clone()),
+        boot_cli,
         hot_state,
         "nockchain",
         None,
-        Some(stack_size_bytes),
+        stack_size,
+
     )
     .await?;
+    let mut nockapp = match result {
+        boot::SetupResult::App(app) => app,
+        boot::SetupResult::ExportedState => {
+            info!("Exiting after successful state export");
+            std::process::exit(0);
+        }
+    };
 
     let keypair = {
         let keypair_path = Path::new(IDENTITY_PATH);
@@ -585,6 +601,13 @@ pub async fn init_with_kernel(
         mine,
         Some(mining_init_tx),
         mining_workers,
+    );
+
+    let mining_driver = crate::mining::create_mining_driver(
+        mining_config,
+        mine,
+        stack_size,
+        Some(mining_init_tx),
     );
 
     nockapp.add_io_driver(mining_driver).await;

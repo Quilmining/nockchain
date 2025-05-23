@@ -86,7 +86,8 @@ impl FromStr for MiningKeyConfig {
 pub fn create_mining_driver(
     mining_config: Option<Vec<MiningKeyConfig>>,
     mine: bool,
-    workers: Option<usize>,
+    nock_stack_size: usize,
+
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
     workers: usize,
 
@@ -142,6 +143,7 @@ pub fn create_mining_driver(
                         KERNEL,
                         &prover_hot_state,
                         false,
+                        nock_stack_size,
                     )
                     .await
                     .expect("Could not load mining kernel");

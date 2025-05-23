@@ -4,7 +4,8 @@ use crate::{default_data_dir, NockApp};
 use chrono;
 use clap::{arg, command, ColorChoice, Parser};
 use nockvm::jets::hot::HotEntry;
-use crate::utils::NOCK_STACK_SIZE;
+use crate::DEFAULT_NOCK_STACK_SIZE;
+
 use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, Level};
@@ -220,7 +221,8 @@ pub async fn setup(
         hot_state,
         name,
         data_dir,
-        nock_stack_size.unwrap_or(NOCK_STACK_SIZE),
+        DEFAULT_NOCK_STACK_SIZE,
+
     )
     .await?;
     match result {
