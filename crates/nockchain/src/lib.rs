@@ -179,8 +179,6 @@ pub struct NockchainCli {
     pub npc_socket: String,
     #[arg(long, help = "Mine in-kernel", default_value = "false")]
     pub mine: bool,
-    #[arg(long, help = "Number of mining worker tasks", default_value_t = 1)]
-    pub mining_workers: usize,
     #[arg(
         long,
         help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"
@@ -216,8 +214,6 @@ pub struct NockchainCli {
     pub btc_password: Option<String>,
     #[arg(long, help = "Auth cookie path for Bitcoin Core RPC")]
     pub btc_auth_cookie: Option<String>,
-    #[arg(long, help = "Nock stack size in MB")]
-    pub nock_stack_size_mb: Option<usize>,
     #[arg(long, short, help = "Initial peer", action = ArgAction::Append)]
     pub peer: Vec<String>,
     #[arg(long, help = "Allowed peer IDs file")]
