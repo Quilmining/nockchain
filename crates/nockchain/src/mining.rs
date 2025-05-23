@@ -13,6 +13,8 @@ use nockvm_macros::tas;
 use tempfile::{tempdir, TempDir};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use crossbeam_queue::SegQueue;
+use tokio::sync::Notify;
 use num_cpus;
 use tracing::{instrument, warn};
 use std::sync::Arc;
@@ -86,7 +88,7 @@ impl FromStr for MiningKeyConfig {
 pub fn create_mining_driver(
     mining_config: Option<Vec<MiningKeyConfig>>,
     mine: bool,
-    nock_stack_size: usize,
+    mining_workers: usize,
 
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
     workers: usize,
@@ -127,6 +129,9 @@ pub fn create_mining_driver(
                 })?;
             }
 
+            let queue: Arc<SegQueue<NounSlab>> = Arc::new(SegQueue::new());
+            let notify = Arc::new(Notify::new());
+
             if mine {
                 let num_kernels = workers.unwrap_or_else(num_cpus::get);
                 for _ in 0..num_kernels {
@@ -152,28 +157,18 @@ pub fn create_mining_driver(
                         .await
                         .push(MiningKernel { kernel, _dir: snapshot_dir });
                 }
+                for _ in 0..mining_workers {
+                    let q = queue.clone();
+                    let n = notify.clone();
+                    let kernel_pool = kernel_pool.clone();
+                    let (cur_handle, worker_handle) = handle.dup();
+                    handle = cur_handle;
+                    tokio::spawn(mining_worker_loop(q, n.clone(), worker_handle, kernel_pool));
+                }
             } else {
                 return Ok(());
             }
 
-            let (candidate_tx, candidate_rx) = mpsc::unbounded_channel::<NounSlab>();
-            let candidate_rx = Arc::new(Mutex::new(candidate_rx));
-
-            for _ in 0..workers.max(1) {
-                let rx = Arc::clone(&candidate_rx);
-                let (cur_handle, mut worker_handle) = handle.dup();
-                handle = cur_handle;
-                tokio::spawn(async move {
-                    while let Some(candidate) = {
-                        let mut guard = rx.lock().await;
-                        guard.recv().await
-                    } {
-                        let (next_handle, attempt_handle) = worker_handle.dup();
-                        worker_handle = next_handle;
-                        mining_attempt(candidate, attempt_handle).await;
-                    }
-                });
-            }
 
             loop {
                 let effect_res = handle.next_effect().await;
@@ -187,9 +182,13 @@ pub fn create_mining_driver(
                 };
 
                 if effect_cell.head().eq_bytes("mine") {
-                    let mut slab = NounSlab::new();
-                    slab.copy_into(effect_cell.tail());
-                    let _ = candidate_tx.send(slab);
+                    let candidate_slab = {
+                        let mut slab = NounSlab::new();
+                        slab.copy_into(effect_cell.tail());
+                        slab
+                    };
+                    queue.push(candidate_slab);
+                    notify.notify_one();
 
                 }
             }
@@ -238,6 +237,25 @@ pub async fn mining_attempt(
         }
     }
     kernel_pool.lock().await.push(kernel_wrapper);
+}
+
+async fn mining_worker_loop(
+    queue: Arc<SegQueue<NounSlab>>,
+    notify: Arc<Notify>,
+    mut handle: NockAppHandle,
+    kernel_pool: Arc<Mutex<Vec<MiningKernel>>>,
+) {
+    loop {
+        let candidate = loop {
+            if let Some(c) = queue.pop() {
+                break c;
+            }
+            notify.notified().await;
+        };
+        let (cur_handle, attempt_handle) = handle.dup();
+        handle = cur_handle;
+        mining_attempt(candidate, attempt_handle, kernel_pool.clone()).await;
+    }
 }
 
 #[instrument(skip(handle, pubkey))]
