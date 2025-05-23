@@ -199,31 +199,24 @@ pub fn create_mining_driver(
 pub async fn mining_attempt(
     candidate: NounSlab,
     handle: NockAppHandle,
-    nock_stack_size: usize,
+    kernel_pool: Arc<Mutex<Vec<MiningKernel>>>,
 ) -> () {
-    let snapshot_dir =
-        tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
-            .await
-            .expect("Failed to create temporary directory");
-    let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
-    let snapshot_path_buf = snapshot_dir.path().to_path_buf();
-    let jam_paths = JamPaths::new(snapshot_dir.path());
-    // Spawns a new std::thread for this mining attempt
-    let kernel = Kernel::load_with_hot_state_huge(
-        snapshot_path_buf,
-        jam_paths,
-        KERNEL,
-        &hot_state,
-        false,
-        nock_stack_size,
-    )
-        .await
-        .expect("Could not load mining kernel");
-    let effects_slab = kernel
+    // Acquire a kernel from the pool for this attempt.  We pop the wrapper so
+    // that the mutex lock is not held across await points.
+    let mut kernel_wrapper = {
+        let mut pool = kernel_pool
+            .lock()
+            .await;
+        pool.pop()
+            .expect("Kernel pool depleted")
+    };
 
+    let effects_slab = kernel_wrapper
+        .kernel
         .poke(MiningWire::Candidate.to_wire(), candidate)
         .await
         .expect("Could not poke mining kernel with candidate");
+
     for effect in effects_slab.to_vec() {
         let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
             drop(effect);
@@ -236,6 +229,8 @@ pub async fn mining_attempt(
                 .expect("Could not poke nockchain with mined PoW");
         }
     }
+
+    // Push the kernel back to the pool for reuse by future attempts.
     kernel_pool.lock().await.push(kernel_wrapper);
 }
 
