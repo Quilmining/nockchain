@@ -10,7 +10,10 @@ use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
 use nockvm::noun::{Atom, D, T};
 use nockvm_macros::tas;
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use num_cpus;
 use tracing::{instrument, warn};
 
 pub enum MiningWire {
@@ -48,6 +51,12 @@ pub struct MiningKeyConfig {
     pub keys: Vec<String>,
 }
 
+#[derive(Debug)]
+struct MiningKernel {
+    kernel: Kernel,
+    _dir: TempDir,
+}
+
 impl FromStr for MiningKeyConfig {
     type Err = String;
 
@@ -78,6 +87,9 @@ pub fn create_mining_driver(
 ) -> IODriverFn {
     Box::new(move |mut handle| {
         Box::pin(async move {
+            let prover_hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
+            let kernel_pool: Arc<Mutex<Vec<MiningKernel>>> = Arc::new(Mutex::new(Vec::new()));
+
             let Some(configs) = mining_config else {
                 enable_mining(&handle, false).await?;
 
@@ -108,9 +120,34 @@ pub fn create_mining_driver(
                 })?;
             }
 
-            if !mine {
+            if mine {
+                let num_kernels = num_cpus::get();
+                for _ in 0..num_kernels {
+                    let snapshot_dir = tokio::task::spawn_blocking(|| {
+                        tempdir().expect("Failed to create temporary directory")
+                    })
+                    .await
+                    .expect("Failed to create temporary directory");
+                    let snapshot_path_buf = snapshot_dir.path().to_path_buf();
+                    let jam_paths = JamPaths::new(snapshot_dir.path());
+                    let kernel = Kernel::load_with_hot_state_huge(
+                        snapshot_path_buf,
+                        jam_paths,
+                        KERNEL,
+                        &prover_hot_state,
+                        false,
+                    )
+                    .await
+                    .expect("Could not load mining kernel");
+                    kernel_pool
+                        .lock()
+                        .await
+                        .push(MiningKernel { kernel, _dir: snapshot_dir });
+                }
+            } else {
                 return Ok(());
             }
+
             let mut next_attempt: Option<NounSlab> = None;
             let mut current_attempt: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
 
@@ -137,7 +174,7 @@ pub fn create_mining_driver(
                             } else {
                                 let (cur_handle, attempt_handle) = handle.dup();
                                 handle = cur_handle;
-                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle));
+                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, kernel_pool.clone()));
                             }
                         }
                     },
@@ -151,7 +188,7 @@ pub fn create_mining_driver(
                         next_attempt = None;
                         let (cur_handle, attempt_handle) = handle.dup();
                         handle = cur_handle;
-                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle));
+                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, kernel_pool.clone()));
 
                     }
                 }
@@ -160,20 +197,14 @@ pub fn create_mining_driver(
     })
 }
 
-pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
-    let snapshot_dir =
-        tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
-            .await
-            .expect("Failed to create temporary directory");
-    let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
-    let snapshot_path_buf = snapshot_dir.path().to_path_buf();
-    let jam_paths = JamPaths::new(snapshot_dir.path());
-    // Spawns a new std::thread for this mining attempt
-    let kernel =
-        Kernel::load_with_hot_state_huge(snapshot_path_buf, jam_paths, KERNEL, &hot_state, false)
-            .await
-            .expect("Could not load mining kernel");
-    let effects_slab = kernel
+pub async fn mining_attempt(
+    candidate: NounSlab,
+    handle: NockAppHandle,
+    kernel_pool: Arc<Mutex<Vec<MiningKernel>>>,
+) -> () {
+    let mut kernel_wrapper = kernel_pool.lock().await.pop().expect("kernel pool empty");
+    let effects_slab = kernel_wrapper
+        .kernel
         .poke(MiningWire::Candidate.to_wire(), candidate)
         .await
         .expect("Could not poke mining kernel with candidate");
@@ -189,6 +220,7 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
                 .expect("Could not poke nockchain with mined PoW");
         }
     }
+    kernel_pool.lock().await.push(kernel_wrapper);
 }
 
 #[instrument(skip(handle, pubkey))]
