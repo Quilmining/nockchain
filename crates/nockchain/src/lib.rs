@@ -243,6 +243,8 @@ pub struct NockchainCli {
     pub max_system_memory_fraction: Option<f64>,
     #[arg(long, help = "Maximum process memory for connection limits (bytes)")]
     pub max_system_memory_bytes: Option<usize>,
+    #[arg(long, help = "Number of mining workers")]
+    pub mining_workers: Option<usize>,
 }
 
 impl NockchainCli {
@@ -583,6 +585,7 @@ pub async fn init_with_kernel(
         Some(mining_init_tx),
         huge_stack_size,
     );
+
     nockapp.add_io_driver(mining_driver).await;
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(

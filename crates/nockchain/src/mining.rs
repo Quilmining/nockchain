@@ -83,6 +83,7 @@ impl FromStr for MiningKeyConfig {
 pub fn create_mining_driver(
     mining_config: Option<Vec<MiningKeyConfig>>,
     mine: bool,
+    workers: Option<usize>,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
     nock_stack_size: usize,
 ) -> IODriverFn {
@@ -122,7 +123,7 @@ pub fn create_mining_driver(
             }
 
             if mine {
-                let num_kernels = num_cpus::get();
+                let num_kernels = workers.unwrap_or_else(num_cpus::get);
                 for _ in 0..num_kernels {
                     let snapshot_dir = tokio::task::spawn_blocking(|| {
                         tempdir().expect("Failed to create temporary directory")
