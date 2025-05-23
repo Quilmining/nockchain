@@ -581,13 +581,18 @@ impl Kernel {
         kernel: &[u8],
         hot_state: &[HotEntry],
         trace: bool,
+        nock_stack_size: usize,
     ) -> Result<Self> {
         let jam_paths_arc = Arc::new(jam_paths);
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let pma_dir_arc = Arc::new(pma_dir);
         let serf = SerfThread::new(
-            NOCK_STACK_SIZE, jam_paths_arc, kernel_vec, hot_state_vec, trace,
+            nock_stack_size,
+            jam_paths_arc,
+            kernel_vec,
+            hot_state_vec,
+            trace,
         )
         .await?;
         Ok(Self {
@@ -602,13 +607,18 @@ impl Kernel {
         kernel: &[u8],
         hot_state: &[HotEntry],
         trace: bool,
+        nock_stack_size: usize,
     ) -> Result<Self> {
         let jam_paths_arc = Arc::new(jam_paths);
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let pma_dir_arc = Arc::new(pma_dir);
         let serf = SerfThread::new(
-            NOCK_STACK_SIZE_HUGE, jam_paths_arc, kernel_vec, hot_state_vec, trace,
+            nock_stack_size,
+            jam_paths_arc,
+            kernel_vec,
+            hot_state_vec,
+            trace,
         )
         .await?;
         Ok(Self {
@@ -634,7 +644,15 @@ impl Kernel {
         kernel: &[u8],
         trace: bool,
     ) -> Result<Self> {
-        Self::load_with_hot_state(pma_dir, jam_paths, kernel, &Vec::new(), trace).await
+        Self::load_with_hot_state(
+            pma_dir,
+            jam_paths,
+            kernel,
+            &Vec::new(),
+            trace,
+            NOCK_STACK_SIZE,
+        )
+        .await
     }
 
     /// Loads a kernel with state from jammed bytes
@@ -645,9 +663,10 @@ impl Kernel {
         state_bytes: &[u8],
         hot_state: &[HotEntry],
         trace: bool,
+        nock_stack_size: usize,
     ) -> Result<Self> {
         let kernel =
-            Self::load_with_hot_state(pma_dir, jam_paths, kernel_jam, hot_state, trace).await?;
+            Self::load_with_hot_state(pma_dir, jam_paths, kernel_jam, hot_state, trace, nock_stack_size).await?;
 
         match kernel
             .serf
