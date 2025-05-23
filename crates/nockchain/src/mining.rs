@@ -75,6 +75,7 @@ pub fn create_mining_driver(
     mining_config: Option<Vec<MiningKeyConfig>>,
     mine: bool,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    nock_stack_size: usize,
 ) -> IODriverFn {
     Box::new(move |mut handle| {
         Box::pin(async move {
@@ -137,7 +138,7 @@ pub fn create_mining_driver(
                             } else {
                                 let (cur_handle, attempt_handle) = handle.dup();
                                 handle = cur_handle;
-                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle));
+                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, nock_stack_size));
                             }
                         }
                     },
@@ -151,7 +152,7 @@ pub fn create_mining_driver(
                         next_attempt = None;
                         let (cur_handle, attempt_handle) = handle.dup();
                         handle = cur_handle;
-                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle));
+                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, nock_stack_size));
 
                     }
                 }
@@ -160,7 +161,11 @@ pub fn create_mining_driver(
     })
 }
 
-pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
+pub async fn mining_attempt(
+    candidate: NounSlab,
+    handle: NockAppHandle,
+    nock_stack_size: usize,
+) -> () {
     let snapshot_dir =
         tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
             .await
@@ -169,10 +174,16 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
     let snapshot_path_buf = snapshot_dir.path().to_path_buf();
     let jam_paths = JamPaths::new(snapshot_dir.path());
     // Spawns a new std::thread for this mining attempt
-    let kernel =
-        Kernel::load_with_hot_state_huge(snapshot_path_buf, jam_paths, KERNEL, &hot_state, false)
-            .await
-            .expect("Could not load mining kernel");
+    let kernel = Kernel::load_with_hot_state_huge(
+        snapshot_path_buf,
+        jam_paths,
+        KERNEL,
+        &hot_state,
+        false,
+        nock_stack_size,
+    )
+        .await
+        .expect("Could not load mining kernel");
     let effects_slab = kernel
         .poke(MiningWire::Candidate.to_wire(), candidate)
         .await
