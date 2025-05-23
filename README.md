@@ -104,7 +104,7 @@ nockchain
 To run a Nockchain node and mine to a pubkey:
 
 ```
-nockchain --mining_pubkey <your_pubkey> --mine
+nockchain --mining_pubkey <your_pubkey> --mine --mining-workers <num_workers>
 ```
 
 For launch, make sure you run in a fresh working directory that does not include a .data.nockchain file from testing.
@@ -114,6 +114,7 @@ For launch, make sure you run in a fresh working directory that does not include
 Use the `--nock-stack-size-mb` flag to control how much memory is reserved for the
 Nock runtime stack. The default is `1024` (1 GB). On most machines we recommend at
 least `4096` and miners may wish to use `16384`.
+
 
 
 ## FAQ

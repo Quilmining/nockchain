@@ -5,6 +5,7 @@ use chrono;
 use clap::{arg, command, ColorChoice, Parser};
 use nockvm::jets::hot::HotEntry;
 use crate::DEFAULT_NOCK_STACK_SIZE;
+
 use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, Level};
@@ -212,6 +213,7 @@ pub async fn setup(
     hot_state: &[HotEntry],
     name: &str,
     data_dir: Option<PathBuf>,
+    nock_stack_size: Option<usize>,
 ) -> Result<NockApp, Box<dyn std::error::Error>> {
     let result = setup_(
         jam,
@@ -220,6 +222,7 @@ pub async fn setup(
         name,
         data_dir,
         DEFAULT_NOCK_STACK_SIZE,
+
     )
     .await?;
     match result {

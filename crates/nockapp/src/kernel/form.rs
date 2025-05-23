@@ -646,6 +646,7 @@ impl Kernel {
         nock_stack_size: usize,
     ) -> Result<Self> {
         Self::load_with_hot_state(pma_dir, jam_paths, kernel, &Vec::new(), trace, nock_stack_size).await
+
     }
 
     /// Loads a kernel with state from jammed bytes
@@ -667,6 +668,7 @@ impl Kernel {
             nock_stack_size,
         )
         .await?;
+
 
         match kernel
             .serf

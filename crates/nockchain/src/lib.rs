@@ -178,6 +178,8 @@ pub struct NockchainCli {
     pub npc_socket: String,
     #[arg(long, help = "Mine in-kernel", default_value = "false")]
     pub mine: bool,
+    #[arg(long, help = "Number of mining worker tasks", default_value_t = 1)]
+    pub mining_workers: usize,
     #[arg(
         long,
         help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"
@@ -211,6 +213,8 @@ pub struct NockchainCli {
     pub btc_password: Option<String>,
     #[arg(long, help = "Auth cookie path for Bitcoin Core RPC")]
     pub btc_auth_cookie: Option<String>,
+    #[arg(long, help = "Nock stack size in MB")]
+    pub nock_stack_size_mb: Option<usize>,
     #[arg(long, short, help = "Initial peer", action = ArgAction::Append)]
     pub peer: Vec<String>,
     #[arg(long, help = "Allowed peer IDs file")]
@@ -244,6 +248,7 @@ pub struct NockchainCli {
 
     #[arg(long, help = "Size of the Nock stack in MB", default_value_t = 1024)]
     pub nock_stack_size_mb: usize,
+
 }
 
 impl NockchainCli {
@@ -378,12 +383,14 @@ pub async fn init_with_kernel(
         * 1024
         * 1024;
     let result = boot::setup_(
+
         kernel_jam,
         boot_cli,
         hot_state,
         "nockchain",
         None,
         stack_size,
+
     )
     .await?;
     let mut nockapp = match result {
@@ -586,6 +593,15 @@ pub async fn init_with_kernel(
     });
 
     let mine = cli.as_ref().map_or(false, |c| c.mine);
+    let mining_workers = cli.as_ref().map_or(1, |c| c.mining_workers);
+
+
+    let mining_driver = crate::mining::create_mining_driver(
+        mining_config,
+        mine,
+        Some(mining_init_tx),
+        mining_workers,
+    );
 
     let mining_driver = crate::mining::create_mining_driver(
         mining_config,
@@ -593,6 +609,7 @@ pub async fn init_with_kernel(
         stack_size,
         Some(mining_init_tx),
     );
+
     nockapp.add_io_driver(mining_driver).await;
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(
