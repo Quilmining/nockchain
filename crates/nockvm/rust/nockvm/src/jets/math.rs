@@ -15,12 +15,41 @@
 use crate::interpreter::Context;
 use crate::jets::util::*;
 use crate::jets::Result;
-use crate::noun::{Atom, DirectAtom, IndirectAtom, Noun, D, DIRECT_MAX, T};
+use crate::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, Slots, D, DIRECT_MAX, T};
 use either::{Left, Right};
 use ibig::ops::DivRem;
 use ibig::UBig;
+use std::str::FromStr;
 
 crate::gdb!();
+
+const FIELD_PRIME_PLACEHOLDER: &str = "0xffff.ffff.0000.0001";
+
+pub fn jet_field_mul(context: &mut Context, subject: Noun) -> Result {
+    let arg = slot(subject, 6)?;
+    let a_noun = slot(arg, 2)?;
+    let b_noun = slot(arg, 3)?;
+
+    let a_atom = a_noun.as_atom()?;
+    let b_atom = b_noun.as_atom()?;
+
+    let stack = &mut context.stack;
+    let a_ubig = a_atom.as_ubig(stack);
+    let b_ubig = b_atom.as_ubig(stack);
+
+    let field_prime_str_cleaned = FIELD_PRIME_PLACEHOLDER.replace(".", "");
+    let field_prime_ubig = UBig::from_str_radix(&field_prime_str_cleaned, 16)
+        .map_err(|_| BAIL_EXIT)?; // Error if parsing fails
+
+    if field_prime_ubig == UBig::from(0u64) {
+        // Modulo by zero is undefined
+        return Err(BAIL_EXIT);
+    }
+
+    let result_ubig = (a_ubig * b_ubig) % field_prime_ubig;
+
+    Ok(Atom::from_ubig(stack, &result_ubig).as_noun())
+}
 
 pub fn jet_add(context: &mut Context, subject: Noun) -> Result {
     let arg = slot(subject, 6)?;
@@ -385,8 +414,9 @@ mod tests {
     use super::*;
     use crate::jets::util::test::*;
     use crate::mem::NockStack;
-    use crate::noun::{Noun, D, NO, T, YES};
-    use ibig::ubig;
+    use crate::noun::{Noun, D, NO, T, YES, Atom}; // Added Atom here
+    use ibig::{ubig, UBig}; // Added UBig here
+    use std::str::FromStr; // Added FromStr
 
     fn atoms(s: &mut NockStack) -> (Noun, Noun, Noun, Noun, Noun) {
         (atom_0(s), atom_24(s), atom_63(s), atom_96(s), atom_128(s))
@@ -746,5 +776,68 @@ mod tests {
         assert_common_jet(c, jet_sub, &[atom_63, atom_63], ubig!(0));
         assert_common_jet(c, jet_sub, &[atom_128, atom_128], ubig!(0));
         assert_common_jet_err(c, jet_sub, &[atom_63, atom_96], BAIL_EXIT);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn test_field_mul() {
+        let c = &mut init_context();
+        let s = &mut c.stack;
+
+        let field_prime_str_cleaned = FIELD_PRIME_PLACEHOLDER.replace(".", "");
+        let field_prime_ubig = UBig::from_str_radix(&field_prime_str_cleaned, 16).unwrap();
+
+        // Test cases:
+        // [0 5] -> 0
+        let arg0 = A(s, &ubig!(0));
+        let arg1 = A(s, &ubig!(5));
+        let sam = T(s, &[arg0, arg1]);
+        assert_jet_ubig(c, jet_field_mul, sam, ubig!(0));
+
+        // [1 5] -> 5
+        let arg0 = A(s, &ubig!(1));
+        let arg1 = A(s, &ubig!(5));
+        let sam = T(s, &[arg0, arg1]);
+        assert_jet_ubig(c, jet_field_mul, sam, ubig!(5));
+
+        // [2 FIELD_PRIME-1] -> FIELD_PRIME-2
+        let arg0 = A(s, &ubig!(2));
+        let arg1_val = field_prime_ubig.clone() - UBig::from(1u32);
+        let arg1 = A(s, &arg1_val);
+        let sam = T(s, &[arg0, arg1]);
+        let expected_res = field_prime_ubig.clone() - UBig::from(2u32);
+        assert_jet_ubig(c, jet_field_mul, sam, expected_res);
+
+        // General case: [10 20] -> 200
+        let arg0 = A(s, &ubig!(10));
+        let arg1 = A(s, &ubig!(20));
+        let sam = T(s, &[arg0, arg1]);
+        assert_jet_ubig(c, jet_field_mul, sam, ubig!(200));
+        
+        // General case: [0xABCDEF 0x123456] -> 0xBC16A034F5C6
+        let val_a = ubig!(0xABCDEF);
+        let val_b = ubig!(0x123456);
+        let arg0 = A(s, &val_a);
+        let arg1 = A(s, &val_b);
+        let sam = T(s, &[arg0, arg1]);
+        let expected_prod = val_a * val_b;
+        assert_jet_ubig(c, jet_field_mul, sam, expected_prod);
+
+
+        // Case with product exceeding FIELD_PRIME
+        // Let a = FIELD_PRIME - 10, b = FIELD_PRIME - 20
+        // (P-10)(P-20) = P^2 -30P + 200 = 200 (mod P)
+        let val_a_large = field_prime_ubig.clone() - UBig::from(10u32);
+        let val_b_large = field_prime_ubig.clone() - UBig::from(20u32);
+        let arg0 = A(s, &val_a_large);
+        let arg1 = A(s, &val_b_large);
+        let sam = T(s, &[arg0, arg1]);
+        assert_jet_ubig(c, jet_field_mul, sam, ubig!(200));
+
+        // Case with one argument being FIELD_PRIME
+        let arg0 = A(s, &field_prime_ubig);
+        let arg1 = A(s, &ubig!(5));
+        let sam = T(s, &[arg0, arg1]);
+        assert_jet_ubig(c, jet_field_mul, sam, ubig!(0));
     }
 }

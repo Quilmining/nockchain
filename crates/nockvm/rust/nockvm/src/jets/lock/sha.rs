@@ -149,12 +149,19 @@ pub fn jet_sha1(context: &mut Context, subject: Noun) -> Result {
     }
 }
 
+pub fn jet_sha256(context: &mut Context, subject: Noun) -> Result {
+    // jet_sha256 is an alias for jet_shax, which takes a single atom as subject
+    jet_shax(context, subject)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::jets::util::test::{assert_jet, assert_jet_err, assert_jet_ubig, init_context, A};
-    use crate::noun::{D, DIRECT_MAX, T};
+    use crate::jets::get_jet; // For testing the alias
+    use crate::noun::{D, DIRECT_MAX, T, Atom}; // Added Atom for from_str
     use ibig::ubig;
+    use nockvm_macros::tas; // For tas! macro
 
     #[test]
     #[cfg_attr(miri, ignore)]
@@ -400,5 +407,40 @@ mod tests {
         );
         let sam = T(&mut c.stack, &[wid, D(1)]);
         assert_jet_err(c, jet_sha1, sam, BAIL_FAIL);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn test_sha256_alias() {
+        let c = &mut init_context();
+        let s = &mut c.stack;
+
+        // Test that get_jet("sha256") returns the jet_sha256 function,
+        // which should be the same as jet_shax.
+        // We'll test by hashing "foo" and comparing with jet_shax's known output.
+        
+        let jet_name_atom = Atom::from_str(s, "sha256").unwrap();
+        let registered_jet_fn = get_jet(c, jet_name_atom.as_noun()).unwrap();
+
+        // Input for "foo"
+        let foo_atom = D(7303014);
+        let subject_payload = foo_atom; // jet_shax (and thus jet_sha256) takes the atom directly as payload
+        let subject = T(s, &[D(0), subject_payload, D(0)]); // Standard jet subject: [battery payload context_stuff]
+
+        let result_noun = registered_jet_fn(c, subject).unwrap();
+        
+        // Expected result for "foo" from jet_shax test
+        let expected_ubig = ubig!(_0xaee76662885e8af9a0bf8364702d42133441301d3c459bf98fc6ff686bb4262c);
+        let expected_atom = A(s, &expected_ubig);
+
+        assert_eq!(result_noun, expected_atom.as_noun());
+
+        // Additionally, directly call jet_sha256 to be sure
+        assert_jet_ubig(
+            c,
+            jet_sha256,
+            D(0), // ''
+            ubig!(_0x55b852781b9995a44c939b64e441ae2724b96f99c8f4fb9a141cfc9842c4b0e3),
+        );
     }
 }

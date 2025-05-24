@@ -13,6 +13,7 @@ pub mod nock;
 pub mod parse;
 pub mod serial;
 pub mod sort;
+pub mod stark; // Add stark module
 pub mod tree;
 
 use crate::flog;
@@ -25,13 +26,14 @@ use crate::jets::hot::{Hot, URBIT_HOT_STATE};
 use crate::jets::list::*;
 use crate::jets::lock::aes::*;
 use crate::jets::lock::ed::*;
-use crate::jets::lock::sha::*;
+use crate::jets::lock::sha::{self, jet_sha256}; // Added jet_sha256 here
 use crate::jets::lute::*;
-use crate::jets::math::*;
+use crate::jets::math::{self, jet_field_mul};
 use crate::jets::nock::*;
 use crate::jets::parse::*;
 use crate::jets::serial::*;
 use crate::jets::sort::*;
+use crate::jets::stark::*; // Import jet_snark_prove
 
 use crate::jets::tree::*;
 use crate::jets::warm::Warm;
@@ -118,6 +120,7 @@ pub fn get_jet(context: &mut Context, jet_name: Noun) -> Option<Jet> {
         tas!(b"mod") => Some(jet_mod),
         tas!(b"mul") => Some(jet_mul),
         tas!(b"sub") => Some(jet_sub),
+        tas!(b"field_mul") => Some(jet_field_mul),
         //
         tas!(b"cap") => Some(jet_cap),
         tas!(b"mas") => Some(jet_mas),
@@ -157,6 +160,7 @@ pub fn get_jet(context: &mut Context, jet_name: Noun) -> Option<Jet> {
         tas!(b"shay") => Some(jet_shay),
         tas!(b"shal") => Some(jet_shal),
         tas!(b"sha1") => Some(jet_sha1),
+        tas!(b"sha256") => Some(jet_sha256),
         //
         tas!(b"scow") => Some(jet_scow),
         //
@@ -173,6 +177,8 @@ pub fn get_jet(context: &mut Context, jet_name: Noun) -> Option<Jet> {
         tas!(b"sivb_de") => Some(jet_sivb_de),
         tas!(b"sivc_en") => Some(jet_sivc_en),
         tas!(b"sivc_de") => Some(jet_sivc_de),
+        //
+        tas!(b"prove") => Some(jet_snark_prove),
         //
         _ => {
             flog!(context, "unknown jet: {:?}", jet_name);
