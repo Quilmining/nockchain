@@ -377,19 +377,44 @@ impl NockchainRequest {
         pow_buf.extend_from_slice(&remote_peer_bytes[..]);
         pow_buf.extend_from_slice(&message_bytes[..]);
 
-        let mut nonce = 0u64;
-        let sol_bytes = loop {
-            {
-                let nonce_buf = &mut pow_buf[0..size_of::<u64>()];
-                nonce_buf.copy_from_slice(&nonce.to_le_bytes()[..]);
+        use std::sync::{mpsc, Arc, atomic::{AtomicBool, Ordering}};
+        use rayon::ThreadPoolBuilder;
+
+        let thread_count = num_cpus::get();
+        let found = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel();
+
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(thread_count)
+            .build()
+            .expect("Failed to build thread pool");
+
+        pool.scope(|s| {
+            for worker_id in 0..thread_count {
+                let mut buf = pow_buf.clone();
+                let mut builder_cl = builder.clone();
+                let found_clone = found.clone();
+                let tx_clone = tx.clone();
+                s.spawn(move |_| {
+                    let mut nonce = worker_id as u64;
+                    while !found_clone.load(Ordering::Relaxed) {
+                        buf[0..size_of::<u64>()].copy_from_slice(&nonce.to_le_bytes());
+                        if let Ok(sols) = builder_cl.solve(&buf[..]) {
+                            if let Some(sol) = sols.get(0) {
+                                if !found_clone.swap(true, Ordering::SeqCst) {
+                                    tx_clone.send((nonce, sol.to_bytes())).ok();
+                                }
+                                break;
+                            }
+                        }
+                        nonce += thread_count as u64;
+                    }
+                });
             }
-            if let Ok(sols) = builder.solve(&pow_buf[..]) {
-                if !sols.is_empty() {
-                    break sols[0].to_bytes();
-                }
-            }
-            nonce += 1;
-        };
+        });
+
+        drop(tx);
+        let (nonce, sol_bytes) = rx.recv().expect("solver threads terminated unexpectedly");
 
         NockchainRequest::Request {
             pow: sol_bytes,
